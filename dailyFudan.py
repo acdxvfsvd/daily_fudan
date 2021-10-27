@@ -11,6 +11,10 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
 
 
+from PIL import ImageEnhance
+from PIL import Image
+import easyocr
+
 class Fudan:
     """
     建立与复旦服务器的会话，执行登录/登出操作
@@ -20,7 +24,8 @@ class Fudan:
     # 初始化会话
     def __init__(self,
                  uid, psw,
-                 url_login='https://uis.fudan.edu.cn/authserver/login'):
+                 url_login='https://uis.fudan.edu.cn/authserver/login',
+                 url_code="https://zlapp.fudan.edu.cn/backend/default/code"):
         """
         初始化一个session，及登录信息
         :param uid: 学号
@@ -30,6 +35,7 @@ class Fudan:
         self.session = session()
         self.session.headers['User-Agent'] = self.UA
         self.url_login = url_login
+        self.url_code = url_code
 
         self.uid = uid
         self.psw = psw
@@ -147,6 +153,30 @@ class Zlapp(Fudan):
             logging.info("未提交")
             self.last_info = last_info["d"]["info"]
 
+    def read_captcha(self, img_byte):
+        img = Image.open(io.BytesIO(img_byte)).convert('L')
+        enh_bri = ImageEnhance.Brightness(img)
+        new_img = enh_bri.enhance(factor=1.5)
+
+        image = numpy.array(new_img)
+        reader = easyocr.Reader(['en'])
+        horizontal_list, free_list = reader.detect(image, optimal_num_chars=4)
+        character = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        allow_list = list(character)
+        allow_list.extend(list(character.lower()))
+
+        result = reader.recognize(image,
+                                allowlist=allow_list,
+                                horizontal_list=horizontal_list[0],
+                                free_list=free_list[0],
+                                detail = 0)
+        return result[0]
+
+
+    def validate_code(self):
+        img = self.session.get(self.url_code).content
+        return self.read_captcha(img)
+
     def checkin(self):
         """
         提交
@@ -165,25 +195,34 @@ class Zlapp(Fudan):
         province = geo_api_info["addressComponent"].get("province", "")
         city = geo_api_info["addressComponent"].get("city", "") or province
         district = geo_api_info["addressComponent"].get("district", "")
-        self.last_info.update(
-                {
-                    "tw"      : "13",
-                    "province": province,
-                    "city"    : city,
-                    "area"    : " ".join(set((province, city, district))),
-                    "ismoved" : 0
-                }
-        )
-        # logging.debug(self.last_info)
 
-        save = self.session.post(
-                'https://zlapp.fudan.edu.cn/ncov/wap/fudan/save',
-                data=self.last_info,
-                headers=headers,
-                allow_redirects=False)
+        while True:
+            code = self.validate_code()
+            logging.debug("验证码 {}".format(code))
+            self.last_info.update(
+                    {
+                        "tw"      : "13",
+                        "province": province,
+                        "city"    : city,
+                        "area"    : " ".join(set((province, city, district))),
+                        # "ismoved" : 0,
+                        "code": code
+                    }
+            )
+            # logging.debug(self.last_info)
 
-        save_msg = json_loads(save.text)["m"]
-        logging.info(save_msg)
+
+            save = self.session.post(
+                    'https://zlapp.fudan.edu.cn/ncov/wap/fudan/save',
+                    data=self.last_info,
+                    headers=headers,
+                    allow_redirects=False)
+
+            save_msg = json_loads(save.text)["m"]
+            logging.info(save_msg)
+            time.sleep(0.1)
+            if(json_loads(save.text)["e"] != 1):
+                break
 
 def get_account():
     """
@@ -197,7 +236,8 @@ if __name__ == '__main__':
     # logging.debug("ACCOUNT：" + uid + psw)
     zlapp_login = 'https://uis.fudan.edu.cn/authserver/login?' \
                   'service=https://zlapp.fudan.edu.cn/site/ncov/fudanDaily'
-    daily_fudan = Zlapp(uid, psw, url_login=zlapp_login)
+    code_url = "https://zlapp.fudan.edu.cn/backend/default/code"
+    daily_fudan = Zlapp(uid, psw, url_login=zlapp_login, url_code=code_url)
     daily_fudan.login()
 
     daily_fudan.check()

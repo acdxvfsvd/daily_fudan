@@ -1,2 +1,5 @@
 lxml
 requests
+easyocr
+pillow
+numpy
