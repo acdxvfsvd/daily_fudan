@@ -3,7 +3,7 @@ from json import loads as json_loads
 from os import path as os_path
 from sys import exit as sys_exit
 from sys import argv as sys_argv
-
+import io
 from lxml import etree
 from requests import session
 import logging
@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.INFO,
 from PIL import ImageEnhance
 from PIL import Image
 import easyocr
+import numpy
 
 class Fudan:
     """
@@ -198,7 +199,7 @@ class Zlapp(Fudan):
 
         while True:
             code = self.validate_code()
-            logging.debug("验证码 {}".format(code))
+            logging.info("验证码 {}".format(code))
             self.last_info.update(
                     {
                         "tw"      : "13",
@@ -206,10 +207,12 @@ class Zlapp(Fudan):
                         "city"    : city,
                         "area"    : " ".join(set((province, city, district))),
                         # "ismoved" : 0,
+                        "sfzx": "1",
+                        "fxyy": "",
                         "code": code
                     }
             )
-            # logging.debug(self.last_info)
+            # logging.info(self.last_info)
 
 
             save = self.session.post(
@@ -217,7 +220,7 @@ class Zlapp(Fudan):
                     data=self.last_info,
                     headers=headers,
                     allow_redirects=False)
-
+            # print(save.text)
             save_msg = json_loads(save.text)["m"]
             logging.info(save_msg)
             time.sleep(0.1)
